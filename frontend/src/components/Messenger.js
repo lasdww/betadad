@@ -449,7 +449,7 @@ const Messenger = () => {
               <input
                 ref={searchInputRef}
                 type="text"
-                placeholder="Поиск по нику#тег..."
+                placeholder="Поиск по имени пользователя..."
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
