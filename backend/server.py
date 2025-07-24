@@ -39,6 +39,14 @@ class User(Base):
     avatar = Column(String, nullable=True)
     last_online = Column(DateTime, default=func.now())
     created_at = Column(DateTime, default=func.now())
+    # Privacy settings
+    invisible_mode = Column(Boolean, default=False)
+    hide_last_seen = Column(Boolean, default=False)
+    hide_profile_info = Column(Boolean, default=False)
+    # Theme settings
+    theme = Column(String, default='light')  # light, dark, custom
+    custom_primary_color = Column(String, default='#3B82F6')
+    custom_secondary_color = Column(String, default='#1E40AF')
 
 class Message(Base):
     __tablename__ = 'messages'
