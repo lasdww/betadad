@@ -36,7 +36,6 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     email = Column(String, unique=True, index=True)
     password = Column(String)
-    tag = Column(String)
     avatar = Column(String, nullable=True)
     last_online = Column(DateTime, default=func.now())
     created_at = Column(DateTime, default=func.now())
@@ -118,9 +117,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-def generate_tag():
-    return ''.join(random.choices(string.digits, k=4))
-
 def update_last_online(user_id: str, db: Session):
     if not user_id:
         return
@@ -137,29 +133,30 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     ).first()
     
     if existing_user:
-        raise HTTPException(status_code=400, detail="User with this username or email already exists")
+        if existing_user.username == user_data.username:
+            raise HTTPException(status_code=400, detail="Пользователь с таким именем уже существует")
+        else:
+            raise HTTPException(status_code=400, detail="Пользователь с таким email уже существует")
     
     # Create new user
-    tag = generate_tag()
     user = User(
         username=user_data.username,
         email=user_data.email,
-        password=get_password_hash(user_data.password),
-        tag=tag
+        password=get_password_hash(user_data.password)
     )
     
     db.add(user)
     db.commit()
     db.refresh(user)
     
-    return {"user_id": user.id, "nick": f"{user.username}#{user.tag}"}
+    return {"user_id": user.id, "nick": user.username}
 
 @api_router.post("/login")
 async def login(user_data: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == user_data.email).first()
     
     if not user or not verify_password(user_data.password, user.password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Неверный email или пароль")
     
     # Update last online
     user.last_online = datetime.utcnow()
@@ -171,24 +168,20 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
 async def get_me(token: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == token).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     
     return {
-        "nick": f"{user.username}#{user.tag}",
+        "nick": user.username,
         "user_id": user.id,
         "avatar": user.avatar
     }
 
 @api_router.get("/search")
 async def search_user(nick: str, db: Session = Depends(get_db)):
-    if "#" not in nick:
-        raise HTTPException(status_code=400, detail="Invalid nick format")
-    
-    username, tag = nick.split("#", 1)
-    user = db.query(User).filter(User.username == username, User.tag == tag).first()
+    user = db.query(User).filter(User.username.ilike(f"%{nick}%")).first()
     
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     
     # Check if user is online (last activity within 60 seconds)
     online = (datetime.utcnow() - (user.last_online or datetime.utcnow())) < timedelta(seconds=60)
@@ -196,7 +189,7 @@ async def search_user(nick: str, db: Session = Depends(get_db)):
     
     return {
         "user_id": user.id,
-        "nick": f"{user.username}#{user.tag}",
+        "nick": user.username,
         "avatar": user.avatar,
         "online": online,
         "last_online": last_online
@@ -206,14 +199,10 @@ async def search_user(nick: str, db: Session = Depends(get_db)):
 async def get_messages(user_id: str, friend_nick: str, db: Session = Depends(get_db)):
     update_last_online(user_id, db)
     
-    if "#" not in friend_nick:
-        raise HTTPException(status_code=400, detail="Invalid nick format")
-    
-    username, tag = friend_nick.split("#", 1)
-    friend = db.query(User).filter(User.username == username, User.tag == tag).first()
+    friend = db.query(User).filter(User.username == friend_nick).first()
     
     if not friend:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     
     # Get messages between users
     messages = db.query(Message).filter(
@@ -241,7 +230,7 @@ async def get_messages(user_id: str, friend_nick: str, db: Session = Depends(get
     for msg in messages:
         sender = db.query(User).filter(User.id == msg.sender_id).first()
         result.append({
-            "from": f"{sender.username}#{sender.tag}",
+            "from": sender.username,
             "text": msg.text,
             "timestamp": msg.timestamp.timestamp(),
             "avatar": sender.avatar
@@ -257,14 +246,10 @@ async def get_messages(user_id: str, friend_nick: str, db: Session = Depends(get
 async def send_message(message_data: MessageCreate, db: Session = Depends(get_db)):
     update_last_online(message_data.user_id, db)
     
-    if "#" not in message_data.friend_nick:
-        raise HTTPException(status_code=400, detail="Invalid nick format")
-    
-    username, tag = message_data.friend_nick.split("#", 1)
-    friend = db.query(User).filter(User.username == username, User.tag == tag).first()
+    friend = db.query(User).filter(User.username == message_data.friend_nick).first()
     
     if not friend:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     
     message = Message(
         sender_id=message_data.user_id,
@@ -288,7 +273,7 @@ async def get_unread_chats(user_id: str, db: Session = Depends(get_db)):
     for msg in unread_messages:
         sender = db.query(User).filter(User.id == msg.sender_id).first()
         if sender:
-            sender_nick = f"{sender.username}#{sender.tag}"
+            sender_nick = sender.username
             chat_counts[sender_nick] = chat_counts.get(sender_nick, 0) + 1
     
     return chat_counts
@@ -339,7 +324,7 @@ async def add_favorite(favorite_data: FavoriteCreate, token: str, db: Session = 
 @api_router.post("/upload")
 async def upload_file(file: UploadFile = File(...), token: str = "", db: Session = Depends(get_db)):
     if not token:
-        raise HTTPException(status_code=401, detail="No token provided")
+        raise HTTPException(status_code=401, detail="Нет токена")
     
     filename = f"{int(time.time())}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, filename)
@@ -362,7 +347,7 @@ async def upload_file(file: UploadFile = File(...), token: str = "", db: Session
 async def update_profile(profile_data: ProfileUpdate, token: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == token).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     
     # Check if username is already taken
     existing_user = db.query(User).filter(
@@ -371,7 +356,7 @@ async def update_profile(profile_data: ProfileUpdate, token: str, db: Session = 
     ).first()
     
     if existing_user:
-        raise HTTPException(status_code=400, detail="Username already taken")
+        raise HTTPException(status_code=400, detail="Имя пользователя уже занято")
     
     user.username = profile_data.new_username
     db.commit()
