@@ -309,7 +309,7 @@ const Messenger = () => {
   };
 
   const getInitials = (name) => {
-    return name ? name.split('#')[0].slice(0, 2).toUpperCase() : '??';
+    return name ? name.slice(0, 2).toUpperCase() : '??';
   };
 
   const renderMessage = (message, index) => {
