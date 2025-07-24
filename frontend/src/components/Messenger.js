@@ -5,26 +5,17 @@ import {
   PaperAirplaneIcon, 
   PaperClipIcon, 
   MicrophoneIcon,
-  MagnifyingGlassIcon,
   ArrowRightOnRectangleIcon,
   HeartIcon,
-  UserCircleIcon,
-  ChatBubbleLeftRightIcon
+  UserCircleIcon
 } from '@heroicons/react/24/outline';
 import { HeartIcon as HeartSolid } from '@heroicons/react/24/solid';
 
 const Messenger = () => {
   const { user, logout, token, API } = useAuth();
-  const [selectedChat, setSelectedChat] = useState(null);
-  const [chats, setChats] = useState([]);
-  const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
   const [favorites, setFavorites] = useState([]);
-  const [activeTab, setActiveTab] = useState('chats');
+  const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -34,62 +25,11 @@ const Messenger = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [favorites]);
 
   useEffect(() => {
-    loadChats();
-    if (activeTab === 'favorites') {
-      loadFavorites();
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (selectedChat && selectedChat !== 'Favorites') {
-      loadMessages();
-    }
-  }, [selectedChat]);
-
-  const loadChats = () => {
-    const savedChats = JSON.parse(localStorage.getItem('chatsList') || '[]');
-    setChats(savedChats);
-  };
-
-  const saveChats = (chatsList) => {
-    localStorage.setItem('chatsList', JSON.stringify(chatsList));
-    setChats(chatsList);
-  };
-
-  const searchUsers = async (query) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    try {
-      const response = await axios.get(`${API}/search`, {
-        params: { nick: query }
-      });
-      setSearchResults([response.data]);
-    } catch (error) {
-      setSearchResults([]);
-    }
-  };
-
-  const loadMessages = async () => {
-    if (!selectedChat || selectedChat === 'Favorites') return;
-
-    try {
-      const response = await axios.get(`${API}/messages`, {
-        params: {
-          user_id: token,
-          friend_nick: selectedChat
-        }
-      });
-      setMessages(response.data.messages || []);
-    } catch (error) {
-      console.error('Error loading messages:', error);
-    }
-  };
+    loadFavorites();
+  }, []);
 
   const loadFavorites = async () => {
     try {
@@ -102,63 +42,53 @@ const Messenger = () => {
     }
   };
 
-  const sendMessage = async () => {
-    if (!newMessage.trim() || !selectedChat || selectedChat === 'Favorites') return;
+  const addToFavorites = async () => {
+    if (!newMessage.trim()) return;
 
-    try {
-      await axios.post(`${API}/messages`, {
-        user_id: token,
-        friend_nick: selectedChat,
-        text: newMessage
-      });
-
-      // Add to chats list if not already there
-      if (!chats.includes(selectedChat)) {
-        const updatedChats = [...chats, selectedChat];
-        saveChats(updatedChats);
-      }
-
-      setNewMessage('');
-      await loadMessages();
-    } catch (error) {
-      console.error('Error sending message:', error);
-    }
-  };
-
-  const addToFavorites = async (message) => {
     try {
       await axios.post(`${API}/favorites`, {
         type: 'text',
-        text: message.text,
-        orig: message
+        text: newMessage
       }, {
         params: { token }
       });
       
-      if (activeTab === 'favorites') {
-        await loadFavorites();
-      }
+      setNewMessage('');
+      await loadFavorites();
     } catch (error) {
       console.error('Error adding to favorites:', error);
     }
   };
 
-  const selectChat = (chatName) => {
-    setSelectedChat(chatName);
-    setActiveTab('chats');
-    if (chatName === 'Favorites') {
-      setMessages([]);
-    }
-  };
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
 
-  const addUserToChats = (userNick) => {
-    if (!chats.includes(userNick)) {
-      const updatedChats = [...chats, userNick];
-      saveChats(updatedChats);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const uploadResponse = await axios.post(`${API}/upload`, formData, {
+        params: { token },
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      if (uploadResponse.data.url) {
+        await axios.post(`${API}/favorites`, {
+          type: 'file',
+          file_url: uploadResponse.data.url,
+          text: `Файл: ${file.name}`
+        }, {
+          params: { token }
+        });
+        
+        await loadFavorites();
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
     }
-    setSelectedChat(userNick);
-    setSearchQuery('');
-    setSearchResults([]);
+    
+    event.target.value = '';
   };
 
   const formatTime = (timestamp) => {
@@ -168,8 +98,51 @@ const Messenger = () => {
     });
   };
 
+  const formatDate = (timestamp) => {
+    return new Date(timestamp * 1000).toLocaleDateString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+  };
+
   const getInitials = (name) => {
     return name ? name.split('#')[0].slice(0, 2).toUpperCase() : '??';
+  };
+
+  const renderFavoriteMessage = (fav, index) => {
+    const isFile = fav.type === 'file' && fav.file_url;
+    const isVoice = fav.type === 'voice' && fav.voice_url;
+
+    return (
+      <div key={index} className="bg-blue-500 text-white rounded-lg px-4 py-3 max-w-md ml-auto">
+        {isFile ? (
+          <div>
+            <a 
+              href={fav.file_url} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-blue-100 hover:text-white underline"
+            >
+              📎 {fav.text || 'Файл'}
+            </a>
+          </div>
+        ) : isVoice ? (
+          <div>
+            <audio controls className="w-full">
+              <source src={fav.voice_url} type="audio/webm" />
+              Ваш браузер не поддерживает аудио элемент.
+            </audio>
+          </div>
+        ) : (
+          <p>{fav.text}</p>
+        )}
+        
+        <p className="text-xs text-blue-100 mt-2">
+          {formatTime(fav.timestamp)}
+        </p>
+      </div>
+    );
   };
 
   return (
